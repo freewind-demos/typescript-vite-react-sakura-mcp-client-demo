@@ -2,12 +2,16 @@ import { useEffect, useState } from "react";
 import {
   callTool,
   connectServer,
-  fetchServers,
+  fetchPreset,
   type CallResult,
   type ConnectResult,
-  type McpServerSummary,
+  type McpServerConfig,
   type McpTool,
+  type RawEntry,
 } from "./api";
+
+// 连接表单的原始输入：全是字符串，提交前再拆成结构化配置
+type FormState = { command: string; args: string; cwd: string; env: string };
 
 // 由 inputSchema 摊平出来的表单字段
 type Field = { name: string; type: string; required: boolean };
@@ -37,8 +41,52 @@ function buildArguments(fields: Field[], values: Record<string, string>): Record
   return args;
 }
 
+// args 输入框里每行一个参数
+function parseArgs(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+// env 输入框里每行一个 KEY=VALUE
+function parseEnv(text: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const index = trimmed.indexOf("=");
+    // 没有等号或等号在开头，都不是合法的环境变量行
+    if (index <= 0) continue;
+    env[trimmed.slice(0, index).trim()] = trimmed.slice(index + 1).trim();
+  }
+  return env;
+}
+
+// 表单 → 接口要的连接信息
+function configOf(form: FormState): McpServerConfig {
+  return {
+    command: form.command.trim(),
+    args: parseArgs(form.args),
+    cwd: form.cwd.trim(),
+    env: parseEnv(form.env),
+  };
+}
+
+// 预填配置 → 表单：args 与 env 各自摊成一行一个
+function formOf(config: McpServerConfig): FormState {
+  return {
+    command: config.command,
+    args: config.args.join("\n"),
+    cwd: config.cwd,
+    env: Object.entries(config.env)
+      .map(([name, value]) => `${name}=${value}`)
+      .join("\n"),
+  };
+}
+
 // 把 MCP 的返回拼成可读文本
-function formatResult(result: CallResult): string {
+function formatResult(result: CallResult["result"]): string {
   const parts = result.content ?? [];
   if (parts.length === 0) return JSON.stringify(result, null, 2);
   return parts.map((part) => (part.type === "text" ? (part.text ?? "") : JSON.stringify(part))).join("\n");
@@ -50,49 +98,43 @@ function messageOf(error: unknown): string {
 }
 
 export default function App() {
-  const [servers, setServers] = useState<McpServerSummary[]>([]);
-  const [serverId, setServerId] = useState("");
+  const [form, setForm] = useState<FormState>({ command: "", args: "", cwd: "", env: "" });
   const [connection, setConnection] = useState<ConnectResult | null>(null);
   const [selectedTool, setSelectedTool] = useState<McpTool | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [result, setResult] = useState("");
+  const [raw, setRaw] = useState<RawEntry[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // 首次进入：拉取可选的 server 列表
-  useEffect(() => {
-    void fetchServers()
-      .then((list) => {
-        setServers(list);
-        setServerId((current) => current || list[0]?.id || "");
-      })
-      .catch((reason: unknown) => setError(messageOf(reason)));
-  }, []);
-
-  // serverId 变化即连接：连上后清空上一次的工具选择与结果
-  useEffect(() => {
-    if (!serverId) return;
-    let cancelled = false;
+  // 连接：换配置就重连，连上后清空上一次的工具选择、结果与报文
+  async function connect(config: McpServerConfig) {
     setBusy(true);
     setError("");
     setResult("");
     setSelectedTool(null);
-    void connectServer(serverId)
-      .then((data) => {
-        if (!cancelled) setConnection(data);
+    setRaw([]);
+    try {
+      const data = await connectServer(config);
+      setConnection(data);
+      setRaw(data.raw);
+    } catch (reason: unknown) {
+      setConnection(null);
+      setError(messageOf(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 首次进入：取回自带 server 的预填配置，填进表单并直接连一次
+  useEffect(() => {
+    void fetchPreset()
+      .then((preset) => {
+        setForm(formOf(preset));
+        return connect(preset);
       })
-      .catch((reason: unknown) => {
-        if (cancelled) return;
-        setConnection(null);
-        setError(messageOf(reason));
-      })
-      .finally(() => {
-        if (!cancelled) setBusy(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [serverId]);
+      .catch((reason: unknown) => setError(messageOf(reason)));
+  }, []);
 
   // 选中工具：把表单值重置为该工具字段的空值
   function selectTool(tool: McpTool) {
@@ -109,8 +151,9 @@ export default function App() {
     setError("");
     try {
       const fields = fieldsOf(selectedTool);
-      const data = await callTool(serverId, selectedTool.name, buildArguments(fields, values));
-      setResult(formatResult(data));
+      const data = await callTool(selectedTool.name, buildArguments(fields, values));
+      setResult(formatResult(data.result));
+      setRaw(data.raw);
     } catch (reason: unknown) {
       setError(messageOf(reason));
     } finally {
@@ -126,14 +169,52 @@ export default function App() {
       <h1>MCP Client</h1>
 
       <section>
-        <label htmlFor="server">Server</label>
-        <select id="server" value={serverId} disabled={busy} onChange={(event) => setServerId(event.target.value)}>
-          {servers.map((server) => (
-            <option key={server.id} value={server.id}>
-              {server.label}
-            </option>
-          ))}
-        </select>
+        <h2>Connection</h2>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void connect(configOf(form));
+          }}
+        >
+          <p>
+            <label htmlFor="command">command *</label>
+            <input
+              id="command"
+              value={form.command}
+              placeholder="npx"
+              onChange={(event) => setForm((previous) => ({ ...previous, command: event.target.value }))}
+            />
+          </p>
+          <p>
+            <label htmlFor="args">args（每行一个）</label>
+            <textarea
+              id="args"
+              rows={3}
+              value={form.args}
+              onChange={(event) => setForm((previous) => ({ ...previous, args: event.target.value }))}
+            />
+          </p>
+          <p>
+            <label htmlFor="cwd">cwd</label>
+            <input
+              id="cwd"
+              value={form.cwd}
+              onChange={(event) => setForm((previous) => ({ ...previous, cwd: event.target.value }))}
+            />
+          </p>
+          <p>
+            <label htmlFor="env">env（每行 KEY=VALUE）</label>
+            <textarea
+              id="env"
+              rows={2}
+              value={form.env}
+              onChange={(event) => setForm((previous) => ({ ...previous, env: event.target.value }))}
+            />
+          </p>
+          <button type="submit" disabled={busy}>
+            Connect
+          </button>
+        </form>
         <p>
           <small>
             {connection?.serverInfo
@@ -193,6 +274,17 @@ export default function App() {
         )}
         {error ? <p role="alert">{error}</p> : null}
         {result ? <pre>{result}</pre> : null}
+      </section>
+
+      <section>
+        <h2>Raw JSON-RPC</h2>
+        {raw.length === 0 ? (
+          <p>
+            <small>暂无报文</small>
+          </p>
+        ) : (
+          <pre>{raw.map((entry) => `${entry.seq} · ${entry.direction} · ${entry.at}\n${entry.text}`).join("\n\n")}</pre>
+        )}
       </section>
     </main>
   );
