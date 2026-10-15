@@ -77,6 +77,12 @@ function record(direction: RawEntry["direction"], message: unknown): void {
   });
 }
 
+// 清空报文日志：每一轮请求只保留本轮的报文，不与上一轮累加
+function resetRaw(): void {
+  rawLog = [];
+  rawSeq = 0;
+}
+
 // 在 transport 层挂钩。MCP SDK 把 JSON-RPC 的收发封装在 Client 内部，
 // 这里包住 transport 的 send 与 onmessage，凡进出的消息都留一份原文。
 function tapTransport(transport: Transport): void {
@@ -114,8 +120,7 @@ async function getClient(config: ServerConfig): Promise<Client> {
   }
 
   // 换一份配置就是一轮新会话，报文日志从头开始
-  rawLog = [];
-  rawSeq = 0;
+  resetRaw();
 
   // Client 是 MCP 客户端本体，connect 时会自动完成 initialize 握手
   const client = new Client({ name: "sakura-mcp-web-client", version: "1.0.0" });
@@ -200,6 +205,8 @@ export function mcpApiPlugin(): Plugin {
           if (req.method === "POST" && url.pathname === "/connect") {
             const body = await readJsonBody(req);
             const config = toConfig(body);
+            // 这一轮只保留连接过程中的报文
+            resetRaw();
             const client = await getClient(config);
             const { tools } = await client.listTools();
             sendJson(res, 200, {
@@ -216,6 +223,8 @@ export function mcpApiPlugin(): Plugin {
           if (req.method === "POST" && url.pathname === "/call") {
             const body = await readJsonBody(req);
             if (!current) throw new Error("尚未连接，请先连接 MCP Server");
+            // 这一轮只保留本次调用的报文
+            resetRaw();
             const result = await current.client.callTool({
               name: String(body.name),
               arguments: (body.arguments ?? {}) as Record<string, unknown>,

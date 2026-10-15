@@ -92,6 +92,11 @@ function formatResult(result: CallResult["result"]): string {
   return parts.map((part) => (part.type === "text" ? (part.text ?? "") : JSON.stringify(part))).join("\n");
 }
 
+// 把一批原始报文拼成可读文本
+function rawText(entries: RawEntry[]): string {
+  return entries.map((entry) => `${entry.seq} · ${entry.direction} · ${entry.at}\n${entry.text}`).join("\n\n");
+}
+
 // 取错误信息
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -103,7 +108,11 @@ export default function App() {
   const [selectedTool, setSelectedTool] = useState<McpTool | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [result, setResult] = useState("");
-  const [raw, setRaw] = useState<RawEntry[]>([]);
+  // 本次调用的原始报文：每次调用整段替换，不与上一次累加
+  const [callRaw, setCallRaw] = useState<RawEntry[]>([]);
+  // 两处 Raw 面板的展开状态
+  const [showToolsRaw, setShowToolsRaw] = useState(false);
+  const [showCallRaw, setShowCallRaw] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -113,11 +122,12 @@ export default function App() {
     setError("");
     setResult("");
     setSelectedTool(null);
-    setRaw([]);
+    setCallRaw([]);
+    setShowToolsRaw(false);
+    setShowCallRaw(false);
     try {
       const data = await connectServer(config);
       setConnection(data);
-      setRaw(data.raw);
     } catch (reason: unknown) {
       setConnection(null);
       setError(messageOf(reason));
@@ -153,7 +163,9 @@ export default function App() {
       const fields = fieldsOf(selectedTool);
       const data = await callTool(selectedTool.name, buildArguments(fields, values));
       setResult(formatResult(data.result));
-      setRaw(data.raw);
+      // 只保留这一次调用的报文
+      setCallRaw(data.raw);
+      setShowCallRaw(false);
     } catch (reason: unknown) {
       setError(messageOf(reason));
     } finally {
@@ -238,6 +250,14 @@ export default function App() {
             </li>
           ))}
         </ul>
+        {connection ? (
+          <>
+            <button type="button" disabled={busy} onClick={() => setShowToolsRaw((previous) => !previous)}>
+              Raw
+            </button>
+            {showToolsRaw ? <pre>{rawText(connection.raw)}</pre> : null}
+          </>
+        ) : null}
       </section>
 
       <section>
@@ -274,17 +294,14 @@ export default function App() {
         )}
         {error ? <p role="alert">{error}</p> : null}
         {result ? <pre>{result}</pre> : null}
-      </section>
-
-      <section>
-        <h2>Raw JSON-RPC</h2>
-        {raw.length === 0 ? (
-          <p>
-            <small>暂无报文</small>
-          </p>
-        ) : (
-          <pre>{raw.map((entry) => `${entry.seq} · ${entry.direction} · ${entry.at}\n${entry.text}`).join("\n\n")}</pre>
-        )}
+        {callRaw.length > 0 ? (
+          <>
+            <button type="button" disabled={busy} onClick={() => setShowCallRaw((previous) => !previous)}>
+              Raw
+            </button>
+            {showCallRaw ? <pre>{rawText(callRaw)}</pre> : null}
+          </>
+        ) : null}
       </section>
     </main>
   );
