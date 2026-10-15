@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    // 浏览器与 Node 两套代码（src 与 server、vite.config.ts）共用一份配置
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    // 只引入 node 全局类型
+    "types": ["node"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    // server 与 vite.config.ts 的 import 带 .ts 扩展名（Vite 原生配置加载器要求）
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    // 只做类型检查，产物交给 vite build
+    "noEmit": true
+  },
+  "include": ["src", "server", "vite.config.ts"]
+}

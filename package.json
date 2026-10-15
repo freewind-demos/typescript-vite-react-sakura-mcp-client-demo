@@ -1,0 +1,25 @@
+{
+  "name": "typescript-vite-react-sakura-mcp-client-demo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host --open",
+    "build": "tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "sakura.css": "1.5.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.1.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  }
+}
