@@ -1,0 +1,7 @@
+/* sakura.css 是 classless 主题，只给 textarea 设了 width: 100%，
+   而 input 走浏览器默认宽度（约 20 字符），于是同一个表单里
+   command / cwd 比 args / env 短。这里把文本输入框也撑满容器，让四个控件等宽。
+   排除 checkbox 与 radio，避免它们的尺寸被拉坏。 */
+input:not([type="checkbox"]):not([type="radio"]) {
+  width: 100%;
+}
