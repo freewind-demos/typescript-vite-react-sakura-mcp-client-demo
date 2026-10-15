@@ -14,7 +14,29 @@ import {
 type FormState = { command: string; args: string; cwd: string; env: string };
 
 // 由 inputSchema 摊平出来的表单字段
-type Field = { name: string; type: string; required: boolean };
+type Field = {
+  name: string;
+  // 参数类型：string / number / integer / boolean / array / object
+  type: string;
+  required: boolean;
+  // 数组元素的类型，用来生成输入示例
+  itemType?: string;
+  // 参数说明，来自 schema 的 description
+  description?: string;
+};
+
+// 数组与对象没办法用一个普通输入框表达，改用 JSON 文本输入
+function isJsonField(field: Field): boolean {
+  return field.type === "array" || field.type === "object";
+}
+
+// 给 JSON 输入框一个看得懂的示例
+function jsonPlaceholder(field: Field): string {
+  if (field.type === "object") return '{ "key": "value" }';
+  if (field.itemType === "number" || field.itemType === "integer") return "[1, 2]";
+  if (field.itemType === "object") return '[{ "key": "value" }]';
+  return '["字符串"]';
+}
 
 // 把工具的 inputSchema 转成表单需要的字段列表
 function fieldsOf(tool: McpTool | null): Field[] {
@@ -24,6 +46,8 @@ function fieldsOf(tool: McpTool | null): Field[] {
     name,
     type: schema.type ?? "string",
     required: required.has(name),
+    itemType: schema.items?.type,
+    description: schema.description,
   }));
 }
 
@@ -34,6 +58,15 @@ function buildArguments(fields: Field[], values: Record<string, string>): Record
     const raw = values[field.name] ?? "";
     // 非必填且留空，就不传这个参数
     if (raw === "" && !field.required) continue;
+    if (isJsonField(field)) {
+      // 数组与对象按 JSON 解析；填错时把字段名带上，便于定位
+      try {
+        args[field.name] = JSON.parse(raw);
+      } catch {
+        throw new Error(`${field.name} 不是合法的 JSON，数组应写成 ["a", "b"]`);
+      }
+      continue;
+    }
     if (field.type === "number" || field.type === "integer") args[field.name] = Number(raw);
     else if (field.type === "boolean") args[field.name] = raw === "true";
     else args[field.name] = raw;
@@ -275,12 +308,27 @@ export default function App() {
                   {field.name}
                   {field.required ? " *" : ""}
                 </label>
-                <input
-                  id={field.name}
-                  value={values[field.name] ?? ""}
-                  placeholder={field.type}
-                  onChange={(event) => setValues((previous) => ({ ...previous, [field.name]: event.target.value }))}
-                />
+                {isJsonField(field) ? (
+                  <textarea
+                    id={field.name}
+                    rows={3}
+                    value={values[field.name] ?? ""}
+                    placeholder={jsonPlaceholder(field)}
+                    onChange={(event) => setValues((previous) => ({ ...previous, [field.name]: event.target.value }))}
+                  />
+                ) : (
+                  <input
+                    id={field.name}
+                    value={values[field.name] ?? ""}
+                    placeholder={field.type}
+                    onChange={(event) => setValues((previous) => ({ ...previous, [field.name]: event.target.value }))}
+                  />
+                )}
+                <small>
+                  {field.type}
+                  {field.itemType ? ` of ${field.itemType}` : ""}
+                  {field.description ? ` · ${field.description}` : ""}
+                </small>
               </p>
             ))}
             <button type="submit" disabled={busy}>

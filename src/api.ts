@@ -20,10 +20,19 @@ export type RawEntry = {
   text: string;
 };
 
+// JSON Schema 里单个参数的描述
+// 数组类型时，items 说明元素自身的类型
+
+export type ToolPropertySchema = {
+  type?: string;
+  description?: string;
+  items?: { type?: string };
+};
+
 // JSON Schema 里我们会用到的部分：属性表与必填项
 export type ToolInputSchema = {
   type?: string;
-  properties?: Record<string, { type?: string; description?: string }>;
+  properties?: Record<string, ToolPropertySchema>;
   required?: string[];
 };
 
